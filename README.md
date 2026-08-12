@@ -3,6 +3,10 @@
 Checks whether each cited link in a piece of text **actually supports the sentence it
 is attached to** — not just whether the link opens.
 
+**▶ Live demo: https://yuqic-sinolytics.github.io/source-verifier/** — no install, no key.
+Also in this repo: a [Chrome extension](extension/) that verifies any link on any page
+you are reading, and reads pages a server-side fetcher cannot.
+
 ```
 🟢 SUPPORTED    verbatim evidence on the page supports the claim
 🟡 PARTIAL      page is on-topic but does not state this specific figure / date / claim
@@ -75,6 +79,29 @@ the model for a `missing_element` ("the 89% fall in the levelised cost of solar 
 rejected, and the UI reports how many were checked and why each failed. A tool that
 admits it cannot find something is far more credible than one that always produces a
 link — but it has to have looked first.
+
+## Chrome extension
+
+`extension/` is a Manifest V3 extension: right-click any cited link → **Verify this
+source** → the verdict appears in the side panel. Load it unpacked from
+`chrome://extensions`; it runs with no API key (provider defaults to offline **Demo**).
+
+It is not a port — it can do something this web version structurally cannot. `web_fetch`
+retrieves pages server-side, so it never executes JavaScript and carries none of your
+cookies. The extension opens the link in a **hidden background tab**, lets the page
+render, and reads the DOM with your session. Measured on a client-rendered test page:
+
+```
+server-side fetcher (raw HTML) :   2 readable words  -> UNREACHABLE
+extension (hidden rendered tab): 113 readable words  -> verifiable
+```
+
+Same page, same URL. If you can read it, the extension can read it — which covers most
+news sites, most government portals, and anything behind a login.
+
+A second consequence: because the extension does its own reading, the model only judges
+text it is handed, so nothing depends on Anthropic-specific fetch tooling and the
+provider is genuinely swappable. See [`extension/README.md`](extension/README.md).
 
 ## Publishing a public demo (GitHub Pages)
 
