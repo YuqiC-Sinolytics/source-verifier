@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Source Verifier</title>
+<style>
+  :root{
+    --fg:#1A1A1A; --dim:#6B7280; --line:#E5E7EB; --bg:#FFFFFF;
+    --green:#16A34A; --amber:#CA8A04; --red:#DC2626; --gray:#9CA3AF;
+    --r:6px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.7 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{display:flex; height:100vh}
+  .left{flex:1 1 60%; padding:56px 48px; overflow-y:auto}
+  .right{flex:1 1 40%; max-width:460px; border-left:1px solid var(--line);
+         padding:56px 36px; overflow-y:auto; background:#FCFCFD}
+
+  h1{font-size:15px; font-weight:600; letter-spacing:-.01em; margin:0 0 2px}
+  .sub{font-size:13px; color:var(--dim); margin:0 0 28px}
+
+  textarea{
+    width:100%; min-height:340px; padding:18px 20px; resize:vertical;
+    border:1px solid var(--line); border-radius:var(--r); background:#fff;
+    font:14px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--fg);
+    outline:none;
+  }
+  textarea:focus{border-color:var(--fg)}
+
+  .bar{display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap}
+  button{
+    font:inherit; font-size:14px; padding:9px 18px; border-radius:var(--r);
+    border:1px solid var(--fg); background:var(--fg); color:#fff; cursor:pointer;
+  }
+  button:disabled{opacity:.4; cursor:default}
+  button.ghost{background:transparent; color:var(--fg); border-color:var(--line)}
+  button.ghost:hover:not(:disabled){border-color:var(--fg)}
+  .counts{font-size:13px; color:var(--dim); margin-left:auto; white-space:nowrap}
+  .counts b{font-weight:600}
+
+  /* example picker */
+  .examples{display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap}
+  .exlabel{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim)}
+  .chip{
+    font:inherit; font-size:13px; padding:4px 11px; border-radius:999px;
+    border:1px solid var(--line); background:#fff; color:var(--dim); cursor:pointer;
+  }
+  .chip:hover{border-color:var(--fg); color:var(--fg)}
+  .chip.on{border-color:var(--fg); color:var(--fg); background:#F9FAFB}
+  .pastehint{font-size:12px; color:var(--green); height:18px; margin-top:6px}
+
+  /* ---- document view: only the anchor text carries the status ---- */
+  #doc{white-space:pre-wrap; font-size:16px; line-height:2.05; display:none}
+  .src{
+    cursor:pointer; white-space:normal;
+    border-bottom:2px solid var(--line); padding:1px 2px;
+    /* anchors wrap across lines — clone the decoration onto every fragment
+       so the underline and highlight do not break apart */
+    -webkit-box-decoration-break:clone; box-decoration-break:clone;
+    border-radius:2px;
+    transition:background .15s ease, border-color .3s ease;
+  }
+  .src:hover{background:#F3F4F6}
+  .src.active{background:#EEF0F3}
+  .src.pending{opacity:.5; border-bottom-style:dashed}
+  .src.SUPPORTED  {border-bottom-color:var(--green)}
+  .src.PARTIAL    {border-bottom-color:var(--amber)}
+  .src.UNSUPPORTED{border-bottom-color:var(--red)}
+  .src.UNREACHABLE{border-bottom-color:var(--gray); border-bottom-style:dashed}
+
+  /* small status dot: a 2px underline under "Reuters" is easy to miss */
+  .dot{
+    display:inline-block; width:6px; height:6px; border-radius:50%;
+    margin-left:4px; vertical-align:.35em; background:var(--line);
+  }
+  .SUPPORTED   > .dot{background:var(--green)}
+  .PARTIAL     > .dot{background:var(--amber)}
+  .UNSUPPORTED > .dot{background:var(--red)}
+  .UNREACHABLE > .dot{background:var(--gray)}
+  .pending     > .dot{animation:pulse 1.1s ease-in-out infinite}
+  .searching   > .dot{background:var(--amber); animation:pulse .9s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.25} 50%{opacity:1}}
+
+  /* ---- detail panel ---- */
+  .empty{color:var(--dim); font-size:13px}
+  .badge{
+    display:inline-block; font-size:11px; font-weight:600; letter-spacing:.06em;
+    padding:3px 9px; border-radius:var(--r); color:#fff; margin-bottom:14px;
+  }
+  .b-SUPPORTED{background:var(--green)} .b-PARTIAL{background:var(--amber)}
+  .b-UNSUPPORTED{background:var(--red)} .b-UNREACHABLE{background:var(--gray)}
+  .b-PENDING{background:var(--line); color:var(--dim)}
+
+  .card{padding-bottom:26px; margin-bottom:26px; border-bottom:1px solid var(--line)}
+  .card:last-child{border-bottom:none}
+  .quoted{font-size:13px; color:var(--dim); font-style:italic; margin:0 0 4px}
+  .reason{font-size:14px; margin:0 0 4px}
+  .none{font-size:13px; color:var(--red); padding:2px 0 2px 14px;
+        border-left:2px solid var(--line)}
+  .jump{font-size:11px; color:var(--dim); margin-top:5px}
+  .label{font-size:11px; letter-spacing:.08em; color:var(--dim);
+         text-transform:uppercase; margin:18px 0 7px}
+  .quote{
+    font:13px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace;
+    border-left:2px solid var(--green); padding:2px 0 2px 14px; color:#374151;
+  }
+  .quote.amber{border-left-color:var(--amber)}
+  .url{font-size:12px; word-break:break-all; color:var(--dim)}
+  .url a{color:var(--dim)}
+  .url.dead{color:var(--red); text-decoration:line-through}
+  .fix{background:#F0FDF4; border:1px solid #BBF7D0; border-radius:var(--r);
+       padding:14px 16px; margin-top:16px}
+  .fix .label{margin-top:0; color:var(--green)}
+  .fix a{color:var(--green); font-size:12px; word-break:break-all}
+  .nofix{background:#FEF2F2; border:1px solid #FECACA; border-radius:var(--r);
+         padding:14px 16px; margin-top:16px; font-size:13px; color:#991B1B}
+  .searchbox{background:#FFFBEB; border:1px solid #FDE68A; border-radius:var(--r);
+             padding:14px 16px; margin-top:16px; font-size:13px; color:#92400E}
+  .tried{font-size:12px; color:var(--dim); margin-top:10px; line-height:1.6}
+  .tried code{font-size:11px; word-break:break-all}
+  .foot{margin-top:30px; font-size:12px; color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="left">
+    <h1>Source Verifier</h1>
+    <p class="sub">Checks whether each cited link actually supports the sentence it is attached to.</p>
+
+    <div class="examples" id="examples">
+      <span class="exlabel">Examples</span>
+    </div>
+
+    <textarea id="input" spellcheck="false"
+      placeholder="Paste text with source links — formatted text from Word, Google Docs or a web page keeps its hyperlinks…"></textarea>
+    <div class="pastehint" id="pastehint"></div>
+    <div id="doc"></div>
+
+    <div class="bar">
+      <button id="go">Verify</button>
+      <button class="ghost" id="reset" style="display:none">Edit text</button>
+      <button class="ghost" id="copyFixed" style="display:none">Copy corrected text</button>
+      <span class="counts" id="counts"></span>
+    </div>
+    <div class="foot" id="foot"></div>
+  </div>
+
+  <div class="right" id="panel">
+    <p class="empty">Click on a colored link to inspect it.</p>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+let CLAIMS = [];          // from the server
+let RESULTS = new Map();  // claim_id -> result
+let SRC = '';
+let activeId = null;
+
+/* Only the [anchor](url) construct becomes a coloured span. Everything else is
+   plain text, so the colour sits under the link text and nothing else. */
+function renderDoc(){
+  const sorted = [...CLAIMS].sort((a,b) => a.link_start - b.link_start);
+  let html = '', cur = 0;
+  for (const c of sorted){
+    if (c.link_start < cur) continue;                    // overlap guard
+    html += esc(SRC.slice(cur, c.link_start));
+    html += `<span class="src pending" data-id="${c.id}" title="Click to inspect">`
+          + `${esc(c.anchor)}<i class="dot"></i></span>`;
+    cur = c.link_end;
+  }
+  html += esc(SRC.slice(cur));
+  const doc = $('#doc');
+  doc.innerHTML = html;
+  doc.style.display = 'block';
+  $('#input').style.display = 'none';
+  doc.querySelectorAll('.src').forEach(el =>
+    el.addEventListener('click', () => showPanel(el.dataset.id)));
+}
+
+function paint(){
+  $('#doc').querySelectorAll('.src').forEach(el => {
+    const r = RESULTS.get(el.dataset.id);
+    el.className = 'src' + (el.dataset.id === activeId ? ' active' : '');
+    if (!r) { el.classList.add('pending'); return; }
+    el.classList.add(r.verdict);
+    if (r.searching) el.classList.add('searching');
+  });
+}
+
+/* ---------- deep links that highlight the evidence on the page ------------
+   Text Fragments (`#:~:text=`) are understood natively by Chrome, Edge and
+   Safari: the browser scrolls to the passage and highlights it. Firefox
+   ignores the directive and simply opens the page, so this degrades safely.
+
+   Long quotes are sent as `textStart,textEnd` — the browser then matches a
+   range instead of one exact string, which survives the whitespace and
+   soft-hyphen differences that make a full-string match fail. */
+function fragUrl(url, quote){
+  if (!url) return url;
+  const clean = (quote || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return url;
+  // '-' is the range separator inside a text directive, so it must be escaped
+  const enc = s => encodeURIComponent(s).replace(/-/g, '%2D');
+  const words = clean.split(' ');
+  const frag = words.length > 12
+    ? `${enc(words.slice(0, 5).join(' '))},${enc(words.slice(-5).join(' '))}`
+    : enc(clean);
+  // a text directive appends to any existing fragment with `:~:`
+  return url.includes('#') ? `${url}:~:text=${frag}` : `${url}#:~:text=${frag}`;
+}
+
+function sourceLink(url, quote, cls){
+  const href = fragUrl(url, quote);
+  const tip = quote ? 'Opens the page and highlights the quoted text' : 'Opens the page';
+  return `<a class="${cls || ''}" href="${href}" target="_blank" rel="noopener" `
+       + `title="${esc(tip)}">${esc(url)}</a>`;
+}
+
+function card(r){
+  const c = r.claim;
+  const dead = ['UNSUPPORTED', 'UNREACHABLE'].includes(r.verdict);
+  let h = `<div class="card">`;
+  h += `<span class="badge b-${r.verdict}">${r.verdict}</span>`;
+
+  // 1 — the cited link
+  h += `<div class="label">Cited link</div>`;
+  h += `<div class="url ${dead ? 'dead' : ''}">${sourceLink(c.url, r.evidence_quote)}</div>`;
+  const meta = [];
+  if (r.reach && r.reach.status) meta.push('HTTP ' + r.reach.status);
+  if (r.reach && r.reach.soft_404) meta.push('soft 404');
+  if (r.reach && r.reach.redirected) meta.push('redirected');
+  if (meta.length) h += `<div class="url">${meta.join(' · ')}</div>`;
+  if (r.evidence_quote) h += `<div class="jump">↗ opens at the highlighted passage</div>`;
+
+  // 2 — what the source actually says
+  h += `<div class="label">Text found in the source</div>`;
+  h += r.evidence_quote
+    ? `<div class="quote ${r.verdict === 'PARTIAL' ? 'amber' : ''}">${esc(r.evidence_quote)}</div>`
+    : `<div class="none">Nothing on the page supports this claim.</div>`;
+
+  // 3 — the sentence being checked
+  h += `<div class="label">Sentence in your text</div>`;
+  h += `<p class="quoted">“${esc(c.display)}”</p>`;
+
+  // 4 — the verdict rationale
+  h += `<div class="label">Analysis</div>`;
+  h += `<p class="reason">${esc(r.reason || '…')}</p>`;
+  if (r.mismatch_type && r.mismatch_type !== 'none')
+    h += `<div class="url">Mismatch type: ${esc(r.mismatch_type)}</div>`;
+
+  // 5 — the repair outcome
+  if (r.searching){
+    h += `<div class="searchbox">Searching the web for a source that states `
+       + `${esc(r.missing_element || 'this claim')}…</div>`;
+  } else if (r.replacement){
+    const rep = r.replacement;
+    h += `<div class="fix"><div class="label">Better source found</div>`
+       + sourceLink(rep.url, rep.evidence_quote);
+    if (rep.evidence_quote){
+      h += `<div class="jump">↗ opens at the highlighted passage</div>`
+         + `<div class="label" style="margin-top:12px">Its evidence</div>`
+         + `<div class="quote">${esc(rep.evidence_quote)}</div>`;
+    }
+    h += `</div>`;
+    if (r.rejected && r.rejected.length)
+      h += `<div class="tried">Rejected ${r.rejected.length} other candidate`
+         + `${r.rejected.length > 1 ? 's' : ''} that did not contain it.</div>`;
+  } else if (r.searched){
+    const n = r.candidates_checked;
+    h += `<div class="nofix">No source found that supports this. `
+       + (n === 0
+            ? `A web search returned no plausible candidate sources. `
+            : `Fetched and checked ${n} candidate${n === 1 ? '' : 's'} — none contained it. `)
+       + `This sentence may be fabricated.</div>`;
+    if (r.rejected && r.rejected.length){
+      h += `<div class="tried">Checked and rejected:<br>`
+         + r.rejected.map(x => `<code>${esc(x.url)}</code> — ${esc(x.reason || x.why || 'no match')}`)
+             .join('<br>') + `</div>`;
+    }
+  }
+  return h + `</div>`;
+}
+
+function showPanel(id){
+  activeId = id;
+  const r = RESULTS.get(id);
+  $('#panel').innerHTML = r ? card(r) : `<p class="empty">Still verifying…</p>`;
+  paint();
+}
+
+function updateCounts(){
+  const n = {SUPPORTED:0, PARTIAL:0, UNSUPPORTED:0, UNREACHABLE:0};
+  RESULTS.forEach(r => n[r.verdict] !== undefined && n[r.verdict]++);
+  $('#counts').innerHTML =
+    `<span style="color:var(--green)">●</span> <b>${n.SUPPORTED}</b>&nbsp;&nbsp;`
+  + `<span style="color:var(--amber)">●</span> <b>${n.PARTIAL}</b>&nbsp;&nbsp;`
+  + `<span style="color:var(--red)">●</span> <b>${n.UNSUPPORTED}</b>&nbsp;&nbsp;`
+  + `<span style="color:var(--gray)">●</span> <b>${n.UNREACHABLE}</b>`
+  + `&nbsp;&nbsp;/&nbsp;&nbsp;${RESULTS.size}/${CLAIMS.length}`;
+}
+
+async function verify(){
+  SRC = $('#input').value.trim();
+  if (!SRC) return;
+  RESULTS = new Map(); CLAIMS = []; activeId = null;
+  $('#go').disabled = true; $('#go').textContent = 'Verifying…';
+  $('#foot').textContent = '';
+  $('#panel').innerHTML = `<p class="empty">Click on a colored link to inspect it.</p>`;
+
+  const res = await fetch('/api/verify', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({text: SRC, repair: true})
+  });
+
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = '';
+  while (true){
+    const {value, done} = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, {stream:true});
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) if (line.trim()) handle(JSON.parse(line));
+  }
+  $('#go').disabled = false; $('#go').textContent = 'Verify';
+  $('#reset').style.display = ''; $('#copyFixed').style.display = '';
+}
+
+let isMock = false;
+function handle(ev){
+  if (ev.type === 'start'){
+    CLAIMS = ev.claims; isMock = ev.mock; renderDoc(); updateCounts();
+    if (isMock) $('#foot').textContent = 'MOCK mode — offline fixtures, no API calls.';
+  } else if (ev.type === 'result'){
+    const r = ev.result;
+    RESULTS.set(r.claim.id, r);
+    paint(); updateCounts();
+    if (activeId === r.claim.id) showPanel(r.claim.id);   // refresh while searching
+  } else if (ev.type === 'done'){
+    $('#foot').textContent = (isMock ? 'MOCK mode · ' : '')
+      + `Verified ${CLAIMS.length} sources in ${(ev.elapsed_ms/1000).toFixed(1)}s.`;
+  } else if (ev.type === 'error'){
+    $('#foot').textContent = 'Error: ' + ev.message;
+  }
+}
+
+/* Take the fixed markdown away — five seconds of demo, but it turns the demo
+   into something usable. */
+function fixedText(){
+  let out = SRC;
+  RESULTS.forEach(r => {
+    if (r.replacement) out = out.split(r.claim.url).join(r.replacement.url);
+  });
+  return out;
+}
+
+/* ---------- rich paste: keep hyperlinks -----------------------------------
+   A plain textarea drops formatting, so pasting from Word, Google Docs or a
+   web page would silently lose every <a href>. We read the text/html flavour
+   of the clipboard instead and convert anchors to markdown, which is what the
+   rest of the pipeline already speaks. */
+
+function unwrapRedirect(href){
+  // Google Docs and Office wrap outbound links in a redirector
+  const m = href.match(/[?&](?:q|url)=([^&]+)/);
+  if (m){
+    try {
+      const inner = decodeURIComponent(m[1]);
+      if (/^https?:\/\//i.test(inner)) return inner;
+    } catch {}
+  }
+  return href;
+}
+
+const BLOCK = new Set(['p','div','li','tr','h1','h2','h3','h4','h5','h6','blockquote','section']);
+const SKIP  = new Set(['script','style','head','meta','link','noscript']);
+
+function walk(node){
+  let out = '';
+  for (const n of node.childNodes){
+    if (n.nodeType === 3){
+      out += n.nodeValue.replace(/\s+/g, ' ');
+    } else if (n.nodeType === 1){
+      const tag = n.tagName.toLowerCase();
+      if (SKIP.has(tag)) continue;
+      if (tag === 'a'){
+        const href = unwrapRedirect(n.getAttribute('href') || '');
+        const label = walk(n).trim();
+        out += /^https?:\/\//i.test(href)
+          ? `[${label || href}](${href})`
+          : label;
+      } else if (tag === 'br'){
+        out += '\n';
+      } else if (BLOCK.has(tag)){
+        out += walk(n).trim() + '\n\n';
+      } else {
+        out += walk(n);
+      }
+    }
+  }
+  return out;
+}
+
+function htmlToMarkdown(html){
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return walk(doc.body)
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+$('#input').addEventListener('paste', e => {
+  const html = e.clipboardData && e.clipboardData.getData('text/html');
+  if (!html) return;                       // plain text — let the browser do it
+  const md = htmlToMarkdown(html);
+  if (!md) return;
+  e.preventDefault();
+  const ta = e.target, a = ta.selectionStart, b = ta.selectionEnd;
+  ta.value = ta.value.slice(0, a) + md + ta.value.slice(b);
+  ta.selectionStart = ta.selectionEnd = a + md.length;
+
+  const n = (md.match(/\]\(https?:\/\//g) || []).length;
+  const hint = $('#pastehint');
+  hint.textContent = n
+    ? `Kept ${n} hyperlink${n === 1 ? '' : 's'} from the pasted text.`
+    : 'Pasted — no hyperlinks found in that selection.';
+  hint.style.color = n ? 'var(--green)' : 'var(--dim)';
+  clearTimeout(hint._t);
+  hint._t = setTimeout(() => hint.textContent = '', 4000);
+});
+
+/* ---------- examples ------------------------------------------------------ */
+let EXAMPLES = [];
+
+function showInput(){
+  $('#input').style.display = ''; $('#doc').style.display = 'none';
+}
+
+function pickExample(i){
+  const ex = EXAMPLES[i];
+  if (!ex) return;
+  $('#input').value = ex.text;
+  showInput();
+  $('#examples').querySelectorAll('.chip')
+    .forEach((c, j) => c.classList.toggle('on', j === i));
+}
+
+async function initExamples(){
+  try {
+    const d = await (await fetch('/api/examples')).json();
+    EXAMPLES = d.examples || [];
+  } catch { EXAMPLES = []; }
+  if (!EXAMPLES.length){ $('#examples').style.display = 'none'; return; }
+
+  const box = $('#examples');
+  EXAMPLES.forEach((ex, i) => {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.textContent = ex.title;
+    b.addEventListener('click', () => pickExample(i));
+    box.appendChild(b);
+  });
+  // Preload the first one so the tool is a single click from a result — on
+  // stage you do not want to be pasting text while people watch.
+  if (!$('#input').value.trim()) pickExample(0);
+}
+
+$('#go').addEventListener('click', verify);
+initExamples();
+$('#reset').addEventListener('click', () => {
+  $('#input').style.display = ''; $('#doc').style.display = 'none';
+  $('#reset').style.display = 'none'; $('#copyFixed').style.display = 'none';
+  $('#counts').textContent = ''; $('#foot').textContent = '';
+  $('#panel').innerHTML = `<p class="empty">Click on a colored link to inspect it.</p>`;
+});
+$('#copyFixed').addEventListener('click', async () => {
+  const text = fixedText();
+  let ok = true;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // clipboard API needs a secure context and can be blocked outright —
+    // fall back so the demo never dies on a permissions prompt
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+  }
+  $('#copyFixed').textContent = ok ? 'Copied ✓' : 'Copy failed';
+  setTimeout(() => $('#copyFixed').textContent = 'Copy corrected text', 1600);
+});
+</script>
+</body>
+</html>
