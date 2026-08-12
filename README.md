@@ -76,6 +76,42 @@ rejected, and the UI reports how many were checked and why each failed. A tool t
 admits it cannot find something is far more credible than one that always produces a
 link — but it has to have looked first.
 
+## Publishing a public demo (GitHub Pages)
+
+```bash
+MOCK=1 python build_static.py     # writes docs/
+git add docs && git commit -m "static demo" && git push
+# GitHub -> Settings -> Pages -> Source: main, folder: /docs
+```
+
+GitHub Pages serves files only, so the FastAPI backend cannot run there — and it must
+not. Verification calls the Claude API, and **an API key shipped inside a web page is a
+key anyone can read out of DevTools**. That single constraint rules out every
+"just move the API call to the frontend" shortcut.
+
+So `build_static.py` runs each example through the real pipeline, records the event
+stream to `docs/data/<example>.json`, and bakes the examples into `docs/index.html`.
+The published page replays those recordings — genuine pipeline output, pre-computed. No
+backend, no key, no cost, no cold start.
+
+The recordings are **re-timed rather than replayed in capture order**. MOCK mode
+resolves instantly and claim-by-claim, whereas a real run verifies every source quickly
+in parallel and then spends seconds on repair searches. Replaying the raw capture would
+look nothing like the live tool, so events are regrouped into the phases a real run
+actually has: verdicts land one by one, searches open together, repairs resolve slowly.
+The result reads as a live run because the shape is the live run's shape.
+
+Two things to know:
+
+- **Edit the `notice` in `build_static.py`** to point at your repo before publishing —
+  it ships with a placeholder URL.
+- Pasting new text into the published page cannot work, and the page says so plainly
+  rather than faking a result. Verifying arbitrary text needs a key, which means running
+  it locally or deploying the backend somewhere with the key as a server-side env var
+  (Render and Hugging Face Spaces both have free tiers; note that free instances sleep,
+  so a judge clicking a cold link may wait through a slow start — which is exactly why
+  the static build is the better demo link).
+
 ## Opening a source at the evidence
 
 Every link in the detail panel — the cited one and any better source found — carries a
